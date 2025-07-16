@@ -28,57 +28,38 @@ mkdir -p "$BACKGROUNDS_DIR"
 
 # Determine if input is URL or local path
 if [[ "$INPUT" =~ ^https?:// ]]; then
-  # It's a URL - download it
-  echo "Downloading from URL: $INPUT"
+  # Get mimetype from HTTP headers
+  CONTENT_TYPE=$(wget --spider --server-response "$INPUT" 2>&1 | grep -i "content-type:" | cut -d':' -f2 | tr -d '\r\n ' | xargs)
 
-  # Extract filename from URL or generate one
-  FILENAME=$(basename "$INPUT")
-  if [[ ! "$FILENAME" =~ \.(jpg|jpeg|png|webp|bmp|gif)$ ]]; then
-    # If no extension or not an image extension, use a default
-    FILENAME="background-$(date +%s).png"
+  if [[ ! "$CONTENT_TYPE" =~ ^image/ ]]; then
+    echo "Error: URL is not an image (detected: Content-Type: $CONTENT_TYPE)"
+    exit 1
   fi
 
+  # Set extension based on mimetype
+  EXT=${CONTENT_TYPE##*/}
+  EXT=${EXT%%;*}
+
+  FILENAME="$THEME_NAME-$(date +%s).$EXT"
   TARGET_PATH="$BACKGROUNDS_DIR/$FILENAME"
 
   # Download the file
-  if command -v curl >/dev/null 2>&1; then
-    curl -L -o "$TARGET_PATH" "$INPUT"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -O "$TARGET_PATH" "$INPUT"
-  else
-    echo "Error: Neither curl nor wget found. Cannot download from URL."
-    exit 1
-  fi
-
-  if [ $? -ne 0 ]; then
-    echo "Error: Failed to download from URL"
+  gum spin --title "Downloading image" -- wget -O "$TARGET_PATH" "$INPUT" || {
     rm -f "$TARGET_PATH"
     exit 1
-  fi
+  }
 
-  # Validate that the downloaded file is actually an image
-  if command -v file >/dev/null 2>&1; then
-    FILE_TYPE=$(file -b --mime-type "$TARGET_PATH")
-    if [[ ! "$FILE_TYPE" =~ ^image/ ]]; then
-      echo "Error: Downloaded file is not a valid image (detected: $FILE_TYPE)"
-      rm -f "$TARGET_PATH"
-      exit 1
-    fi
-  else
-    # Fallback: check file size (empty or very small files are likely errors)
-    FILE_SIZE=$(stat -c%s "$TARGET_PATH" 2>/dev/null || echo "0")
-    if [ "$FILE_SIZE" -lt 1024 ]; then
-      echo "Error: Downloaded file appears to be invalid (too small: ${FILE_SIZE} bytes)"
-      rm -f "$TARGET_PATH"
-      exit 1
-    fi
-  fi
-
-  echo "Downloaded to: $TARGET_PATH"
 else
   # It's a local path - copy it
   if [ ! -f "$INPUT" ]; then
     echo "Error: File not found: $INPUT"
+    exit 1
+  fi
+
+  # Validate that the local file is actually an image
+  FILE_TYPE=$(file -b --mime-type "$INPUT")
+  if [[ ! "$FILE_TYPE" =~ ^image/ ]]; then
+    echo "Error: File is not a valid image (detected: $FILE_TYPE)"
     exit 1
   fi
 
@@ -91,7 +72,6 @@ else
     exit 1
   fi
 
-  echo "Copied to: $TARGET_PATH"
 fi
 
 # Set the new background as current
@@ -100,5 +80,3 @@ ln -nsf "$TARGET_PATH" "$CURRENT_BACKGROUND_LINK"
 # Apply the background
 pkill -x swaybg
 setsid swaybg -i "$TARGET_PATH" -m fill >/dev/null 2>&1 &
-
-echo "Background set successfully!"
